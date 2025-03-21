@@ -1,0 +1,54 @@
+Vagrant.configure("2") do |config|
+  # Definimos las 3 máquinas virtuales
+  servers = [
+    {name: "web1", ip: "192.168.56.10", role: "apache"},
+    {name: "web2", ip: "192.168.56.11", role: "apache"},
+    {name: "loadbalancer", ip: "192.168.56.12", role: "nginx"}
+  ]
+
+  servers.each do |server|
+    config.vm.define server[:name] do |vm|
+      vm.vm.box = "ubuntu/bionic64" # Puedes cambiar la versión de Ubuntu si lo deseas
+      vm.vm.hostname = server[:name]
+      vm.vm.network "private_network", ip: server[:ip]
+      vm.vm.provider "virtualbox" do |vb|
+        vb.memory = "512"
+        vb.cpus = 1
+      end
+
+      # Instalación de paquetes
+      vm.vm.provision "shell", inline: <<-SHELL
+        sudo apt update -y
+      SHELL
+
+      if server[:role] == "apache"
+        # Configurar Apache
+        vm.vm.provision "shell", inline: <<-SHELL
+          sudo apt install -y apache2
+          echo "<h1>Servidor #{server[:name]}</h1>" | sudo tee /var/www/html/index.html
+          sudo systemctl restart apache2
+        SHELL
+      elsif server[:role] == "nginx"
+        # Configurar Nginx como balanceador de carga
+        vm.vm.provision "shell", inline: <<-SHELL
+          sudo apt install -y nginx
+          cat <<EOL | sudo tee /etc/nginx/sites-available/loadbalancer
+          upstream backend {
+              server 192.168.56.10;
+              server 192.168.56.11;
+          }
+
+          server {
+              listen 80;
+              location / {
+                  proxy_pass http://backend;
+              }
+          }
+          EOL
+          sudo ln -s /etc/nginx/sites-available/loadbalancer /etc/nginx/sites-enabled/
+          sudo systemctl restart nginx
+        SHELL
+      end
+    end
+  end
+end
